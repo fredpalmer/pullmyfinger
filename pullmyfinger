@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+#--------------------------------------------------------------------------------------------------
+# Title:        pullmyfinger
+# Author:       Fred Palmer (fred@studionow.com)
+# Date:         2012.02.01
+# Purpose:      Make pull requests easier and quicker to accomplish as well as facilitate better
+#               Github integration in general
+#
+# Installation: To install do the following:
+#               Source this script or add the following line to your .bashrc or .bash_profile
+#                   source <path to where it will live>/pullmyfinger
+#               Set the following environment variables (also in your .bashrc or .bash_profile):
+#                   GITHUB_LOGIN=<your github login name>
+#                   GITHUB_API_TOKEN=<your github api token>  # see https://github.com/account/admin
+#
+#--------------------------------------------------------------------------------------------------
+__PULLMYFINGER_VERSION="0.9"
+
+__pmf_display_version() {
+    echo "pullmyfinger ${__PULLMYFINGER_VERSION}
+
+Copyright 2012  Fred Palmer <fred@studionow.com>
+"
+}
+
+__pmf_display_usage() {
+    echo "
+Usage: pullmyfinger [OPTION] branch|remote
+
+Examples:
+
+    # Create a pull request to the remote \"studionow\" using the base (i.e. the target branch) of \"master\"
+    pullmyfinger studionow/master
+
+    # List all pull requests to the remote \"studionow\" for the current clone
+    pullmyfinger --list-pull-requests studionow
+
+General:
+    -h, --help                  Show this help text
+    -v, --version               Display version
+
+List pull requests:
+    -l, --list-pull-requests    List open pull requests for the remote specified
+
+Report bugs to <fred@studionow.com>
+"
+
+    __pmf_display_version
+
+    return 0;
+}
+
+__pmf_github_create_pull_request() {
+    local return_code=1
+    local target_branch=$1
+    
+    # Validate argument exists
+    [[ -z "${target_branch}" ]] && { echo "ERROR => Could not determine target branch for pull request..."; return ${return_code}; }
+    
+    # Validate the argument is a branch
+    if ! \git rev-parse --verify --quiet "${target_branch}" > /dev/null
+    then
+        echo "ERROR => The target/base branch could not be verified as a valid git reference..."
+        return ${return_code}
+    else
+        target_branch=$(\git rev-parse --symbolic-full-name ${target_branch})
+    fi
+    local source_branch="$(\git symbolic-ref HEAD 2>/dev/null)"
+    local commit_message="$(\git show -s --format=%s)"
+    
+    # Strip the refs/remotes from the symbolic full name of the target
+    target_branch="${target_branch#refs/remotes/}"
+    base_branch="${target_branch#*/}"
+    remote_name="${target_branch%/$base_branch}"
+    
+    # Get project name from git config
+    local project=$(\git config --get remote.${remote_name}.url)
+    project=${project##*/}
+    project=${project%.git}
+    
+    local github_api_url="http://github.com/api/v2/json/pulls/${remote_name}/${project}"
+    
+    echo "Initiating Github API request with the following configuration:"
+    echo "    Base branch   => ${base_branch}"
+    echo "    Source branch => ${source_branch}"
+    echo "    Github Url    => ${github_api_url}"
+    local github_output=$(\curl --silent \
+        -u "${GITHUB_LOGIN}/token:${GITHUB_API_TOKEN}" \
+        -d "pull[base]=${base_branch}" \
+        -d "pull[head]=${GITHUB_LOGIN}:${source_branch}" \
+        -d "pull[title]=Pull request to ${target_branch} from ${GITHUB_LOGIN}/${source_branch#refs/heads/}" \
+        -d "pull[body]=Please pull these commits into ${target_branch}.  Here is the latest commit message:
+
+*\"${commit_message}\"*
+
+**PS - Fred S. Palmer III rocks and I love him**" \
+        ${github_api_url})
+
+    if [[ -z "${github_output}" ]]
+    then
+        echo -e "ERROR => Pull request failed to create :(\n\n${github_output}"
+    else
+        # Now make sure we didn't have an error message returned
+        local error_message=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['error'][0]" 2>/dev/null)
+        if [[ -z ${error_message} ]]
+        then
+            local github_url=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['pull']['html_url']")
+            echo "Pull request was created successfully at ${github_url}"
+            \open ${github_url}
+            return_code=0
+        else
+            echo -e "\n\nERROR => Pull request failed to create :(\n\n${error_message}\n"
+        fi
+    fi
+
+    return ${return_code}
+}
+
+__pmf_github_list_pull_requests() {
+    local remote_name=$1
+
+    # Validate argument exists
+    [[ -z "${remote_name}" ]] && { echo "ERROR => Could not determine remote name to list pull requests..."; return 99; }
+
+    # Get project name from git config
+    local project=$(\git config --get remote.${remote_name}.url)
+    project=${project##*/}
+    project=${project%.git}
+
+    local github_api_url="http://github.com/api/v2/json/pulls/${remote_name}/${project}"
+
+    echo "Initiating Github API request with the following configuration:"
+    echo "    Remote name   => ${remote_name}"
+    echo "    Github Url    => ${github_api_url}"
+
+    \curl --silent -u "${GITHUB_LOGIN}/token:${GITHUB_API_TOKEN}" ${github_api_url} | python -m json.tool
+}
+
+__pmf_validate_environment() {
+    local return_code=0
+
+    # Verify environment variables are set
+    [[ -z ${GITHUB_LOGIN} ]] && { echo "ERROR => \"GITHUB_LOGIN\" env variable was not set..."; return_code=99; }
+    [[ -z ${GITHUB_API_TOKEN} ]] && { echo "ERROR => \"GITHUB_API_TOKEN\" env variable was not set...
+        see https://github.com/account/admin to get it..."; return_code=99; }
+
+    # Verify git exists
+    type -P git >/dev/null || { echo "ERROR => The program \"git\" was not found in the current PATH..."; return_code=99; }
+
+    # Verify curl exists
+    type -P curl >/dev/null || { echo "ERROR => The program \"curl\" was not found in the current PATH..."; return_code=99; }
+
+    return ${return_code}
+}
+
+__pmf_gateway() {
+    local command list_pull_requests
+
+    for script_arg in "$@";
+    do
+        command="${script_arg#--}"
+        case "${command}" in
+            list-pull-requests)
+                # pop the command argument we just parsed - we don't need to pass it to the handler
+                shift || return $?;
+                __pmf_validate_environment || return $?;
+                __pmf_github_list_pull_requests $@ || return $?;
+                break;
+            ;;
+            help|h)
+                __pmf_display_usage;
+                break;
+            ;;
+            version|v)
+                __pmf_display_version;
+                break;
+            ;;
+            *)
+                __pmf_validate_environment || return $?;
+                __pmf_github_create_pull_request $@ || return $?;
+                break;
+            ;;
+        esac
+    done
+
+    return $?
+}
+
+__pmf_completion()
+{
+    local cur prev opts
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    if [[ ${prev} == "pullmyfinger" ]]
+    then
+        if [[ ${cur} == -* ]] ; then
+            opts="--help --version --list-pull-requests"
+            COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+            return 0
+        else
+            opts=$(\git branch -r | \grep -v "HEAD")
+            COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+            return 0
+        fi
+    elif [[ ${prev} == --list-pull-requests ]]
+    then
+        opts=$(\git remote show)
+        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        return 0
+    fi
+}
+
+alias pullmyfinger="__pmf_gateway"
+complete -F __pmf_completion pullmyfinger
