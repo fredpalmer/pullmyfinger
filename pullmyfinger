@@ -50,6 +50,19 @@ Report bugs to <fred@studionow.com>
     return 0;
 }
 
+__pmf_get_api_url() {
+    local remote_name=$1
+
+    # Get project name from git config
+    local project=$(\git config --get remote.${remote_name}.url)
+    project=${project##*:}
+    local url_path=${project%%/*}
+    project=${project##*/}
+    project=${project%.git}
+
+    echo "http://github.com/api/v2/json/pulls/${url_path}/${project}"
+}
+
 __pmf_github_create_pull_request() {
     local return_code=1
     local target_branch=$1
@@ -72,13 +85,8 @@ __pmf_github_create_pull_request() {
     target_branch="${target_branch#refs/remotes/}"
     base_branch="${target_branch#*/}"
     remote_name="${target_branch%/$base_branch}"
-    
-    # Get project name from git config
-    local project=$(\git config --get remote.${remote_name}.url)
-    project=${project##*/}
-    project=${project%.git}
-    
-    local github_api_url="http://github.com/api/v2/json/pulls/${remote_name}/${project}"
+
+    local github_api_url=$(__pmf_get_api_url ${remote_name})
     
     echo "Initiating Github API request with the following configuration:"
     echo "    Base branch   => ${base_branch}"
@@ -122,12 +130,7 @@ __pmf_github_list_pull_requests() {
     # Validate argument exists
     [[ -z "${remote_name}" ]] && { echo "ERROR => Could not determine remote name to list pull requests..."; return 99; }
 
-    # Get project name from git config
-    local project=$(\git config --get remote.${remote_name}.url)
-    project=${project##*/}
-    project=${project%.git}
-
-    local github_api_url="http://github.com/api/v2/json/pulls/${remote_name}/${project}"
+    local github_api_url=$(__pmf_get_api_url ${remote_name})
 
     echo "Initiating Github API request with the following configuration:"
     echo "    Remote name   => ${remote_name}"
