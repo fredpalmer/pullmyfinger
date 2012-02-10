@@ -4,9 +4,9 @@
 # Author:       Fred Palmer (fred@studionow.com)
 # Date:         2012.02.01
 # Purpose:      Make pull requests easier and quicker to accomplish as well as facilitate better
-#               Github integration in general
+#               Github integration.
 #
-# Installation: To install do the following:
+# Installation:
 #               Source this script or add the following line to your .bashrc or .bash_profile
 #                   source <path to where it will live>/pullmyfinger
 #               Set the following environment variables (also in your .bashrc or .bash_profile):
@@ -26,6 +26,12 @@ Copyright 2012  Fred Palmer <fred@studionow.com>
 __pmf_display_usage() {
     echo "
 Usage: pullmyfinger [OPTION] branch|remote
+
+Config:
+    Uses the following environment variables:
+    GITHUB_LOGIN                A valid Github login (Required)
+    GITHUB_API_TOKEN            A valid Gihub API token for the GITHUB_LOGIN (Required)
+    PULLMYFINGER_SIGNATURE      The signature to put at the end of a pull request message (Optional)
 
 Examples:
 
@@ -101,7 +107,7 @@ __pmf_github_create_pull_request() {
 
 *\"${commit_message}\"*
 
-**PS - Fred S. Palmer III rocks and I love him**" \
+${PULLMYFINGER_SIGNATURE}" \
         ${github_api_url})
 
     if [[ -z "${github_output}" ]]
