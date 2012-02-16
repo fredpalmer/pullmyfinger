@@ -167,9 +167,9 @@ __pmf_gateway() {
 
     for script_arg in "$@";
     do
-        command="${script_arg#--}"
+        command="${script_arg#-*}"
         case "${command}" in
-            list-pull-requests)
+            list-pull-requests|l)
                 # pop the command argument we just parsed - we don't need to pass it to the handler
                 shift || return $?;
                 __pmf_validate_environment || return $?;
@@ -213,7 +213,7 @@ __pmf_completion()
             COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
             return 0
         fi
-    elif [[ ${prev} == --list-pull-requests ]]
+    elif [[ ${prev} == --list-pull-requests || ${prev} == -l ]]
     then
         opts=$(\git remote show)
         COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
