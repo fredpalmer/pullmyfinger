@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -e
+source ./pullmyfinger
 
 declare -r LOG_DEFAULT_COLOR="\033[0m"
 declare -r LOG_ERROR_COLOR="\033[1;31m"
@@ -24,6 +25,9 @@ __pmf_gateway --help
 
 log "Testing --list-pull-requests"
 __pmf_gateway --list-pull-requests origin
+
+log "Testing --debug"
+__pmf_gateway --debug --list-pull-requests origin
 
 log "Testing a pull request creation"
 __pmf_gateway master
