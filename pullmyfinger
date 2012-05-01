@@ -11,8 +11,11 @@
 #                   source <path to where it will live>/pullmyfinger
 #               Set the following environment variables (also in your .bashrc or .bash_profile):
 #                   GITHUB_LOGIN=<your github login name>
-#                   GITHUB_API_TOKEN=<your github api token>  # see https://github.com/account/admin
+#                   GITHUB_PASSWORD=<your github password>
 #
+# More Information:
+#               https://github.com/fredpalmer/pullmyfinger
+#               http://developer.github.com/v3/
 #--------------------------------------------------------------------------------------------------
 __PULLMYFINGER_VERSION="0.9"
 
@@ -20,6 +23,7 @@ __pmf_display_version() {
     echo "pullmyfinger ${__PULLMYFINGER_VERSION}
 
 Copyright 2012  Fred Palmer <fred@studionow.com>
+    https://github.com/fredpalmer/pullmyfinger
 "
 }
 
@@ -30,7 +34,7 @@ Usage: pullmyfinger [OPTION] branch|remote
 Config:
     Uses the following environment variables:
     GITHUB_LOGIN                A valid Github login (Required)
-    GITHUB_API_TOKEN            A valid Gihub API token for the GITHUB_LOGIN (Required)
+    GITHUB_PASSWORD             A valid password for the Github login
     PULLMYFINGER_SIGNATURE      The signature to put at the end of a pull request message (Optional)
 
 Examples:
@@ -44,9 +48,13 @@ Examples:
 General:
     -h, --help                  Show this help text
     -v, --version               Display version
+    --debug                     Displays debugging information
+    --base                      Explicitly set the base (or target) branch for a pull request
+    --head                      Explicitly set the head (or source) branch for a pull request
 
-List pull requests:
-    -l, --list-pull-requests    List open pull requests for the remote specified
+Get various types of data associated with a repo:
+    --list-pull-requests        List open pull requests for the remote specified
+    --list-milestones           List open milestones
 
 Report bugs to <fred@studionow.com>
 "
@@ -56,58 +64,89 @@ Report bugs to <fred@studionow.com>
     return 0;
 }
 
-__pmf_get_api_url() {
-    local remote_name=$1
+__pmf_github_get_api_url() {
+    local remote_name project github_user request_type
+    remote_name=$1
+    request_type=$2
 
     # Get project name from git config
-    local project=$(\git config --get remote.${remote_name}.url)
+    project=$(\git config --get remote.${remote_name}.url)
     project=${project##*:}
-    local url_path=${project%%/*}
+    github_user=${project%%/*}
     project=${project##*/}
     project=${project%.git}
 
-    echo "http://github.com/api/v2/json/pulls/${url_path}/${project}"
+    echo "https://api.github.com/repos/${github_user}/${project}/${request_type}"
 }
 
 __pmf_github_create_pull_request() {
-    local return_code=1
-    local target_branch=$1
-    
+    local return_code target_branch head_branch source_branch command script_arg commit_message milestone
+    local github_output github_api_url error_message github_url pull_request_number milestone_number payload
+    return_code=1
+    target_branch=$1
+
+    for script_arg in "$@";
+    do
+        # Strip all dashes from the commands
+        command="${script_arg#--}"
+
+        case "${command}" in
+            base)
+                shift
+                target_branch=$1
+                shift
+            ;;
+            head)
+                shift
+                head_branch=$1
+                shift
+            ;;
+        esac
+    done;
+
     # Validate argument exists
     [[ -z "${target_branch}" ]] && { echo "ERROR => Could not determine target branch for pull request..."; return ${return_code}; }
     
     # Validate the argument is a branch
     if ! \git rev-parse --verify --quiet "${target_branch}" > /dev/null
     then
-        echo "ERROR => The target/base branch could not be verified as a valid git reference..."
+        echo "ERROR => The target/base branch \"${target_branch}\" could not be verified as a valid git reference..."
         return ${return_code}
     else
         target_branch=$(\git rev-parse --symbolic-full-name ${target_branch})
     fi
-    local source_branch="$(\git symbolic-ref HEAD 2>/dev/null)"
-    local commit_message="$(\git show -s --format=%s)"
-    
+
+    if [[ -z ${head_branch} ]]
+    then
+        # Get the symbolic name for the branch we are currently on (this is the most common usage)
+        head_branch="$(\git symbolic-ref HEAD 2>/dev/null)"
+    fi
+
+    # Get the last commit message from the branch we are using as the head branch
+    commit_message=$(\git show -s --format=%s ${head_branch} | sed -e 's/"//g')
+
     # Strip the refs/remotes from the symbolic full name of the target
     target_branch="${target_branch#refs/remotes/}"
     base_branch="${target_branch#*/}"
-    remote_name="${target_branch%/$base_branch}"
+    remote_name="${target_branch%/${base_branch}}"
 
-    local github_api_url=$(__pmf_get_api_url ${remote_name})
+    github_api_url=$(__pmf_github_get_api_url ${remote_name} "pulls")
+    payload="{
+    \"title\": \"Pull request to ${target_branch} from ${GITHUB_LOGIN}/${head_branch#refs/heads/}\",
+    \"body\": \"Please pull these commits into ${target_branch}.  Here is the latest commit message:\n\n*\\\"${commit_message}\\\"*\n\n${PULLMYFINGER_SIGNATURE}\",
+    \"head\": \"${GITHUB_LOGIN}:${head_branch}\",
+    \"base\": \"${base_branch}\"
+}"
     
     echo "Initiating Github API request with the following configuration:"
-    echo "    Base branch   => ${base_branch}"
-    echo "    Source branch => ${source_branch}"
-    echo "    Github Url    => ${github_api_url}"
-    local github_output=$(\curl --silent \
-        -u "${GITHUB_LOGIN}/token:${GITHUB_API_TOKEN}" \
-        -d "pull[base]=${base_branch}" \
-        -d "pull[head]=${GITHUB_LOGIN}:${source_branch}" \
-        -d "pull[title]=Pull request to ${target_branch} from ${GITHUB_LOGIN}/${source_branch#refs/heads/}" \
-        -d "pull[body]=Please pull these commits into ${target_branch}.  Here is the latest commit message:
-
-*\"${commit_message}\"*
-
-${PULLMYFINGER_SIGNATURE}" \
+    echo "    Base (target) branch   => ${target_branch}"
+    echo "    Head (source) branch   => ${head_branch}"
+    echo "    Github Url             => ${github_api_url}"
+    github_output=$(\curl --silent \
+        --request POST \
+        --header "Content-type: application/json" \
+        --user "${GITHUB_LOGIN}:${GITHUB_PASSWORD}" \
+        --data "${payload}" \
         ${github_api_url})
 
     if [[ -z "${github_output}" ]]
@@ -115,11 +154,24 @@ ${PULLMYFINGER_SIGNATURE}" \
         echo -e "ERROR => Pull request failed to create :(\n\n${github_output}"
     else
         # Now make sure we didn't have an error message returned
-        local error_message=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['error'][0]" 2>/dev/null)
+        error_message=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['message']" 2>/dev/null)
         if [[ -z ${error_message} ]]
         then
-            local github_url=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['pull']['html_url']")
-            echo "Pull request was created successfully at ${github_url}"
+            github_url=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['html_url']")
+            pull_request_number=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['number']")
+            echo "Pull request ${pull_request_number} was created successfully at ${github_url}"
+
+            # Now try to associate a milestone with it
+            # PATCH /repos/:user/:repo/issues/:number
+            # github_api_url=$(__pmf_github_get_api_url ${remote_name} "issues/${pull_request_number}")
+            # TODO: create/retrieve milestone number based on base_branch
+            # milestone_number=5
+            # \curl --silent \
+                # --request PATCH \
+                # --header "Content-type: application/json" \
+                # --user "${GITHUB_LOGIN}:${GITHUB_PASSWORD}" \
+                # --data "{\"milestone\":\"${milestone_number}\"}" \
+                # ${github_api_url}
             \open ${github_url}
             return_code=0
         else
@@ -130,19 +182,25 @@ ${PULLMYFINGER_SIGNATURE}" \
     return ${return_code}
 }
 
-__pmf_github_list_pull_requests() {
-    local remote_name=$1
+__pmf_github_list_item_type() {
+    local remote_name git_hub_api_url item_type
+    remote_name=$1
+    item_type=$2
 
-    # Validate argument exists
-    [[ -z "${remote_name}" ]] && { echo "ERROR => Could not determine remote name to list pull requests..."; return 99; }
+    # Validate number and content of arguments
+    (( "$#" < 2 )) || [[ -z "${remote_name}" ]] && {
+        echo "ERROR => Could not determine remote name for api request...";
+        return 99;
+    }
+    [[ -z "${item_type}" ]] && { echo "ERROR => Could not determine item type of api request..."; return 99; }
 
-    local github_api_url=$(__pmf_get_api_url ${remote_name})
+    local github_api_url=$(__pmf_github_get_api_url ${remote_name} ${item_type})
 
-    echo "Initiating Github API request with the following configuration:"
+    echo "Initiating Github API ${item_type} request with the following configuration:"
     echo "    Remote name   => ${remote_name}"
     echo "    Github Url    => ${github_api_url}"
 
-    \curl --silent -u "${GITHUB_LOGIN}/token:${GITHUB_API_TOKEN}" ${github_api_url} | python -m json.tool
+    \curl --silent --user "${GITHUB_LOGIN}:${GITHUB_PASSWORD}" ${github_api_url} | python -m json.tool
 }
 
 __pmf_validate_environment() {
@@ -150,8 +208,7 @@ __pmf_validate_environment() {
 
     # Verify environment variables are set
     [[ -z ${GITHUB_LOGIN} ]] && { echo "ERROR => \"GITHUB_LOGIN\" env variable was not set..."; return_code=99; }
-    [[ -z ${GITHUB_API_TOKEN} ]] && { echo "ERROR => \"GITHUB_API_TOKEN\" env variable was not set...
-        see https://github.com/account/admin to get it..."; return_code=99; }
+    [[ -z ${GITHUB_PASSWORD} ]] && { echo "ERROR => \"GITHUB_PASSWORD\" env variable was not set..."; return_code=99; }
 
     # Verify git exists
     type -P git >/dev/null || { echo "ERROR => The program \"git\" was not found in the current PATH..."; return_code=99; }
@@ -163,17 +220,33 @@ __pmf_validate_environment() {
 }
 
 __pmf_gateway() {
-    local command list_pull_requests
+    local command return_value debug_mode
+    debug_mode=0
+    return_value=0
 
     for script_arg in "$@";
     do
-        command="${script_arg#-*}"
+        # strip all dashes from the commands
+        command="${script_arg#--}"
+        command="${command#-}"
+
         case "${command}" in
-            list-pull-requests|l)
-                # pop the command argument we just parsed - we don't need to pass it to the handler
-                shift || return $?;
-                __pmf_validate_environment || return $?;
-                __pmf_github_list_pull_requests $@ || return $?;
+            debug)
+                # Pop the command argument we just parsed - we don't need to pass it to the handler
+                shift || { return_value=$?; break; }
+                debug_mode=1;
+                echo "Turning on debug mode...";
+                set -x
+                # This is a command modifier, so we don't actually want to break on this match
+            ;;
+            list-pull-requests)
+                # Pop the command argument we just parsed - we don't need to pass it to the handler
+                shift && __pmf_validate_environment && __pmf_github_list_item_type $@ "pulls?state=open" || { return_value=$?; }
+                break;
+            ;;
+            list-milestones)
+                # Pop the command argument we just parsed - we don't need to pass it to the handler
+                shift && __pmf_validate_environment && __pmf_github_list_item_type $@ "milestones?state=open" || { return_value=$?; }
                 break;
             ;;
             help|h)
@@ -185,36 +258,86 @@ __pmf_gateway() {
                 break;
             ;;
             *)
-                __pmf_validate_environment || return $?;
-                __pmf_github_create_pull_request $@ || return $?;
+                __pmf_validate_environment && __pmf_github_create_pull_request $@ || { return_value=$?; }
                 break;
             ;;
         esac
     done
 
-    return $?
+    # Turn off debug mode if we turned it on previously
+    if [[ ${debug_mode} -eq 1 ]]
+    then
+        echo "Turning off debug mode..."
+        set +x
+    fi
+
+    return ${return_value}
 }
 
 __pmf_completion()
 {
-    local cur prev opts
+    local cur prev prev2 opts comp_options
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
+    if [[ ${#COMP_WORDS[@]} -gt 2 ]]
+    then
+        prev2="${COMP_WORDS[COMP_CWORD-2]}"
+    else
+        prev2=""
+    fi
 
     if [[ ${prev} == "pullmyfinger" ]]
     then
         if [[ ${cur} == -* ]] ; then
-            opts="--help --version --list-pull-requests"
+            # User is trying to specify the command line directive to use
+            opts="--help --milestone --debug --base --head --version --list-pull-requests --list-milestones"
             COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
             return 0
         else
+            # User is trying to specify the remote branch to issue a pull request to
             opts=$(\git branch -r | \grep -v "HEAD")
             COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
             return 0
         fi
-    elif [[ ${prev} == --list-pull-requests || ${prev} == -l ]]
+    elif [[ ${prev2} == --base && ${COMP_WORDS[1]} != --head ]]
     then
+        # User is trying to manually specify the base and head for a pull request and
+        # has completed setting the --base option and now
+        # we can automatically fill in the --head part and start
+        # command line completion for it as well
+        opts="--head"
+        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        return 0
+    elif [[ ${prev2} == --head && ${COMP_WORDS[1]} != --base ]]
+    then
+        # User is trying to manually specify the base and head for a pull request and
+        # has completed setting the --head option and now
+        # we can automatically fill in the --base part and start
+        # command line completion for it as well
+        opts="--base"
+        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        return 0
+    elif [[ ${prev} == --base || ${prev} == --head ]]
+    then
+        # User is trying to manually specify the base and head for a pull request and
+        # has completed setting the --head and/or --base option and needs to auto-complete
+        # the remote branch to use as the option's value
+        opts=$(\git branch -r | \grep -v "HEAD")
+        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        return 0
+    elif [[ ${prev} == --list-* ]]
+    then
+        # User is trying to use one of the "list" read-only style commands and needs
+        # to autocomplete with the configured remotes for the current working clone
+        opts=$(\git remote show)
+        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        return 0
+    elif [[ ${prev} == --milestone ]]
+    then
+        # User is trying to specify a milestone to associate a pull request with and
+        # needs to autocomplete the list of current open milestones
+        #__pmf_github_list_item_type $@ "milestones?state=open"
         opts=$(\git remote show)
         COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
         return 0
