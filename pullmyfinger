@@ -276,73 +276,78 @@ __pmf_gateway() {
 
 __pmf_completion()
 {
-    local cur prev prev2 opts comp_options
+    local current_word previous_word previous_previous_word completion_options
     COMPREPLY=()
-    cur="${COMP_WORDS[COMP_CWORD]}"
-    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    current_word="${COMP_WORDS[COMP_CWORD]}"
+    previous_word="${COMP_WORDS[COMP_CWORD-1]}"
     if [[ ${#COMP_WORDS[@]} -gt 2 ]]
     then
-        prev2="${COMP_WORDS[COMP_CWORD-2]}"
+        previous_previous_word="${COMP_WORDS[COMP_CWORD-2]}"
     else
-        prev2=""
+        previous_previous_word=""
     fi
 
-    if [[ ${prev} == "pullmyfinger" ]]
-    then
-        if [[ ${cur} == -* ]] ; then
-            # User is trying to specify the command line directive to use
-            opts="--help --milestone --debug --base --head --version --list-pull-requests --list-milestones"
-            COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
-            return 0
-        else
-            # User is trying to specify the remote branch to issue a pull request to
-            opts=$(\git branch -r | \grep -v "HEAD")
-            COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
-            return 0
-        fi
-    elif [[ ${prev2} == --base && ${COMP_WORDS[1]} != --head ]]
+    if [[ ${previous_previous_word} == --base && ${COMP_WORDS[1]} != --head ]]
     then
         # User is trying to manually specify the base and head for a pull request and
         # has completed setting the --base option and now
         # we can automatically fill in the --head part and start
         # command line completion for it as well
-        opts="--head"
-        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        completion_options="--head"
+        COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
         return 0
-    elif [[ ${prev2} == --head && ${COMP_WORDS[1]} != --base ]]
+    elif [[ ${previous_previous_word} == --head && ${COMP_WORDS[1]} != --base ]]
     then
         # User is trying to manually specify the base and head for a pull request and
         # has completed setting the --head option and now
         # we can automatically fill in the --base part and start
         # command line completion for it as well
-        opts="--base"
-        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        completion_options="--base"
+        COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
         return 0
-    elif [[ ${prev} == --base || ${prev} == --head ]]
+    elif [[ ${previous_word} == --base || ${previous_word} == --head ]]
     then
         # User is trying to manually specify the base and head for a pull request and
         # has completed setting the --head and/or --base option and needs to auto-complete
         # the remote branch to use as the option's value
-        opts=$(\git branch -r | \grep -v "HEAD")
-        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        completion_options=$(\git branch -r | \grep -v "HEAD")
+        COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
         return 0
-    elif [[ ${prev} == --list-* ]]
+    elif [[ ${previous_word} == --list-* ]]
     then
         # User is trying to use one of the "list" read-only style commands and needs
         # to autocomplete with the configured remotes for the current working clone
-        opts=$(\git remote show)
-        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        completion_options=$(\git remote show)
+        COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
         return 0
-    elif [[ ${prev} == --milestone ]]
+    elif [[ ${previous_word} == --milestone ]]
     then
         # User is trying to specify a milestone to associate a pull request with and
         # needs to autocomplete the list of current open milestones
         #__pmf_github_list_item_type $@ "milestones?state=open"
-        opts=$(\git remote show)
-        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
+        completion_options=$(\git remote show)
+        COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
         return 0
+    else
+        if [[ ${current_word} == -* ]] ; then
+            # User is trying to specify the command line directive to use
+            completion_options="--help --milestone --debug --base --head --version --list-pull-requests --list-milestones"
+            COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
+            return 0
+        else
+            # User is trying to specify the remote branch to issue a pull request to
+            completion_options=$(\git branch -r | \grep -v "HEAD")
+            COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
+            return 0
+        fi
     fi
 }
 
 alias pullmyfinger="__pmf_gateway"
 complete -F __pmf_completion pullmyfinger
+
+# Also run the completion scripts for any aliases out there
+for aliased_command in $(\alias | \grep "='pullmyfinger'" | \cut -d ' ' -f2 | \cut -d '=' -f1)
+do
+    complete -F __pmf_completion ${aliased_command}
+done
