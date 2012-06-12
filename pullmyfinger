@@ -345,3 +345,9 @@ __pmf_completion()
 
 alias pullmyfinger="__pmf_gateway"
 complete -F __pmf_completion pullmyfinger
+
+# Also run the completion scripts for any aliases out there
+for aliased_command in $(\alias | \grep "='pullmyfinger'" | \cut -d ' ' -f2 | \cut -d '=' -f1)
+do
+    complete -F __pmf_completion ${aliased_command}
+done
