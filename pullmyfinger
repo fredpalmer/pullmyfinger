@@ -34,7 +34,7 @@ Usage: pullmyfinger [OPTION] branch|remote
 Config:
     Uses the following environment variables:
     GITHUB_LOGIN                A valid Github login (Required)
-    GITHUB_PASSWORD             A valid password for the Github login
+    GITHUB_PASSWORD             A valid password for the Github login (Required)
     PULLMYFINGER_SIGNATURE      The signature to put at the end of a pull request message (Optional)
 
 Examples:
