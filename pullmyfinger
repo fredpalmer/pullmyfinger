@@ -84,7 +84,6 @@ __pmf_github_get_api_url() {
     github_user=${project%%/*}
     project=${project##*/}
     project=${project%.git}
-
     echo "https://api.github.com/repos/${github_user}/${project}/${request_type}"
 }
 
@@ -122,12 +121,12 @@ __pmf_github_create_pull_request() {
                 shift
                 base_branch=$1
                 shift
-            ;;
+                ;;
             head)
                 shift
                 head_branch=$1
                 shift
-            ;;
+                ;;
         esac
     done;
 
@@ -220,7 +219,7 @@ __pmf_github_create_pull_request() {
 }
 
 __pmf_github_list_item_type() {
-    local remote_name git_hub_api_url item_type
+    local remote_name git_hub_api_url item_type github_api_url
     remote_name=$1
     item_type=$2
 
@@ -231,7 +230,7 @@ __pmf_github_list_item_type() {
     }
     [[ -z "${item_type}" ]] && { echo "ERROR => Could not determine item type of api request..."; return 99; }
 
-    local github_api_url=$(__pmf_github_get_api_url ${remote_name} ${item_type})
+    github_api_url=$(__pmf_github_get_api_url ${remote_name} ${item_type})
 
     echo "Initiating Github API ${item_type} request with the following configuration:"
     echo "    Remote name   => ${remote_name}"
@@ -241,7 +240,8 @@ __pmf_github_list_item_type() {
 }
 
 __pmf_validate_environment() {
-    local return_code=0
+    local return_code
+    return_code=0
 
     # Verify environment variables are set
     [[ -z ${GITHUB_LOGIN} ]] && { echo "ERROR => \"GITHUB_LOGIN\" env variable was not set..."; return_code=99; }
@@ -275,29 +275,29 @@ __pmf_gateway() {
                 echo "Turning on debug mode...";
                 set -x
                 # This is a command modifier, so we don't actually want to break on this match
-            ;;
+                ;;
             list-pull-requests)
                 # Pop the command argument we just parsed - we don't need to pass it to the handler
                 shift && __pmf_validate_environment && __pmf_github_list_item_type $@ "pulls?state=open" || { return_value=$?; }
                 break;
-            ;;
+                ;;
             list-milestones)
                 # Pop the command argument we just parsed - we don't need to pass it to the handler
                 shift && __pmf_validate_environment && __pmf_github_list_item_type $@ "milestones?state=open" || { return_value=$?; }
                 break;
-            ;;
+                ;;
             help|h)
                 __pmf_display_usage;
                 break;
-            ;;
+                ;;
             version|v)
                 __pmf_display_version;
                 break;
-            ;;
+                ;;
             *)
                 __pmf_validate_environment && __pmf_github_create_pull_request $@ || { return_value=$?; }
                 break;
-            ;;
+                ;;
         esac
     done
 
@@ -311,73 +311,89 @@ __pmf_gateway() {
     return ${return_value}
 }
 
-__pmf_completion()
-{
-    local current_word previous_word previous_previous_word completion_options
+__pmf_completion() {
+    local current_word previous_word previous_word2 completion_options
     COMPREPLY=()
     current_word="${COMP_WORDS[COMP_CWORD]}"
     previous_word="${COMP_WORDS[COMP_CWORD-1]}"
+
     if [[ ${#COMP_WORDS[@]} -gt 2 ]]
     then
-        previous_previous_word="${COMP_WORDS[COMP_CWORD-2]}"
+        previous_word2="${COMP_WORDS[COMP_CWORD-2]}"
     else
-        previous_previous_word=""
+        previous_word2=""
     fi
 
-    if [[ ${previous_previous_word} == --base && ${COMP_WORDS[1]} != --head ]]
+    current_word="${COMP_WORDS[COMP_CWORD]}"
+    previous_word="${COMP_WORDS[COMP_CWORD-1]}"
+
+    if [[ ${current_word} =~ ^--(base|head).* ]] || \
+       [[ ${current_word} == "=" && ${previous_word} =~ ^--(base|head).* ]] || \
+       [[ ${previous_word2} =~ ^--(base|head) ]]
+    then
+        # User is trying to manually specify the base and head for a pull request and
+        # has completed setting the --head and/or --base option and needs to auto-complete
+        # the remote branch to use as the option's value
+
+        # filter out previous branches selected
+        previous_word=${previous_word#--base}
+        previous_word=${previous_word#--head}
+        previous_word=${previous_word#=}
+        # On older versions of bash this will be the branch name that was previously selected
+        # On newer versions of bash this will be blank
+        if [[ "${previous_word}" != "" ]]
+        then
+            completion_options=$(\git branch -r | \grep -v "HEAD" | \grep -v ${previous_word})
+        else
+            if [[ ${previous_word2} =~ ^--(base|head) ]] && (( ${COMP_CWORD} > 4 ))
+            then
+                completion_options=$(\git branch -r | \grep -v "HEAD" | \grep -v ${COMP_WORDS[3]})
+            else
+                completion_options=$(\git branch -r | \grep -v "HEAD")
+            fi
+        fi
+
+        # massage what's matched so its (compatible with older versions of bash)
+        current_word=${current_word#--base}
+        current_word=${current_word#--head}
+        current_word=${current_word#=}
+    elif [[ "${COMP_LINE}" == *--base=* && ${COMP_LINE} != *--head=* ]]
     then
         # User is trying to manually specify the base and head for a pull request and
         # has completed setting the --base option and now
         # we can automatically fill in the --head part and start
         # command line completion for it as well
-        completion_options="--head"
-        COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
-        return 0
-    elif [[ ${previous_previous_word} == --head && ${COMP_WORDS[1]} != --base ]]
+        completion_options="--head="
+    elif [[ "${COMP_LINE}" == *--head=* && ${COMP_LINE} != *--base=* ]]
     then
         # User is trying to manually specify the base and head for a pull request and
         # has completed setting the --head option and now
         # we can automatically fill in the --base part and start
         # command line completion for it as well
-        completion_options="--base"
-        COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
-        return 0
-    elif [[ ${previous_word} == --base || ${previous_word} == --head ]]
-    then
-        # User is trying to manually specify the base and head for a pull request and
-        # has completed setting the --head and/or --base option and needs to auto-complete
-        # the remote branch to use as the option's value
-        completion_options=$(\git branch -r | \grep -v "HEAD")
-        COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
-        return 0
+        completion_options="--base="
     elif [[ ${previous_word} == --list-* ]]
     then
         # User is trying to use one of the "list" read-only style commands and needs
         # to autocomplete with the configured remotes for the current working clone
         completion_options=$(\git remote show)
-        COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
-        return 0
-    elif [[ ${previous_word} == --milestone ]]
+    elif (( ${COMP_CWORD} < 2))
     then
-        # User is trying to specify a milestone to associate a pull request with and
-        # needs to autocomplete the list of current open milestones
-        #__pmf_github_list_item_type $@ "milestones?state=open"
-        completion_options=$(\git remote show)
-        COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
-        return 0
-    else
-        if [[ ${current_word} == -* ]] ; then
+        if [[ ${current_word} == -* ]]
+        then
             # User is trying to specify the command line directive to use
-            completion_options="--help --milestone --debug --base --head --version --list-pull-requests --list-milestones"
+            completion_options="--help --debug --base= --head= --version --list-pull-requests --list-milestones"
             COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
-            return 0
-        else
+        elif [[ "${COMP_LINE}" != *--* ]]
+        then
             # User is trying to specify the remote branch to issue a pull request to
             completion_options=$(\git branch -r | \grep -v "HEAD")
-            COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
-            return 0
         fi
     fi
+
+    COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
+    [[ ${COMPREPLY} == *= ]] && compopt -o nospace
+
+    return 0
 }
 
 alias pullmyfinger=__pmf_gateway
