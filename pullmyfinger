@@ -117,15 +117,11 @@ __pmf_github_create_pull_request() {
         command="${script_arg#--}"
 
         case "${command}" in
-            base)
-                shift
-                base_branch=$1
-                shift
+            base=*)
+                base_branch="${command#*=}"
                 ;;
-            head)
-                shift
-                head_branch=$1
-                shift
+            head=*)
+                head_branch="${command#*=}"
                 ;;
         esac
     done;
@@ -257,56 +253,62 @@ __pmf_validate_environment() {
 }
 
 __pmf_gateway() {
-    local command return_value debug_mode
+    local command return_value debug_mode script_arg filtered_options
     debug_mode=0
     return_value=0
 
     for script_arg in "$@";
     do
-        # strip all dashes from the commands
+        # Strip all dashes from the commands
         command="${script_arg#--}"
         command="${command#-}"
 
         case "${command}" in
-            debug)
-                # Pop the command argument we just parsed - we don't need to pass it to the handler
-                shift || { return_value=$?; break; }
-                debug_mode=1;
-                echo "Turning on debug mode...";
-                set -x
-                # This is a command modifier, so we don't actually want to break on this match
-                ;;
-            list-pull-requests)
-                # Pop the command argument we just parsed - we don't need to pass it to the handler
-                shift && __pmf_validate_environment && __pmf_github_list_item_type $@ "pulls?state=open" || { return_value=$?; }
-                break;
-                ;;
-            list-milestones)
-                # Pop the command argument we just parsed - we don't need to pass it to the handler
-                shift && __pmf_validate_environment && __pmf_github_list_item_type $@ "milestones?state=open" || { return_value=$?; }
-                break;
-                ;;
             help|h)
-                __pmf_display_usage;
-                break;
+                return __pmf_display_usage;
                 ;;
             version|v)
-                __pmf_display_version;
-                break;
+                return __pmf_display_version;
+                ;;
+            debug)
+                debug_mode=1;
                 ;;
             *)
-                __pmf_validate_environment && __pmf_github_create_pull_request $@ || { return_value=$?; }
-                break;
+                filtered_options=( "${filtered_options[@]}" "${command}" )
                 ;;
         esac
     done
 
-    # Turn off debug mode if we turned it on previously
-    if [[ ${debug_mode} -eq 1 ]]
+    # Turn on debug mode if it was requested
+    (( ${debug_mode} )) && { echo "Turning on debug mode..."; set -x; }
+
+    if __pmf_validate_environment
     then
-        echo "Turning off debug mode..."
-        set +x
+        for script_arg in "${filtered_options[@]}";
+        do
+            case "${script_arg}" in
+                list-pull-requests)
+                    # Pop the command argument we just parsed - we don't need to pass it to the handler
+                    shift && __pmf_github_list_item_type "${filtered_options[@]}" "pulls?state=open" || { return_value=$?; }
+                    break;
+                    ;;
+                list-milestones)
+                    # Pop the command argument we just parsed - we don't need to pass it to the handler
+                    shift && __pmf_github_list_item_type "${filtered_options[@]}" "milestones?state=open" || { return_value=$?; }
+                    break;
+                    ;;
+                *)
+                    __pmf_github_create_pull_request "${filtered_options[@]}" || { return_value=$?; }
+                    break;
+                    ;;
+            esac
+        done
+    else
+        echo "WTF"
     fi
+
+    # Turn off debug mode if we turned it on previously
+    (( ${debug_mode} )) && { echo "Turning off debug mode..."; set +x; }
 
     return ${return_value}
 }
