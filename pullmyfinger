@@ -265,10 +265,12 @@ __pmf_gateway() {
 
         case "${command}" in
             help|h)
-                return __pmf_display_usage;
+                __pmf_display_usage;
+                return $?;
                 ;;
             version|v)
-                return __pmf_display_version;
+                __pmf_display_version;
+                return $?;
                 ;;
             debug)
                 debug_mode=1;
@@ -395,7 +397,7 @@ __pmf_completion() {
     COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
     [[ ${COMPREPLY} == *= ]] && compopt -o nospace
 
-    return 0
+    return 0;
 }
 
 alias pullmyfinger=__pmf_gateway
