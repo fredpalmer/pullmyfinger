@@ -65,9 +65,18 @@ Report bugs to <fred@studionow.com>
 }
 
 __pmf_github_get_github_user() {
+    # Git Url Specification:
+    #   http://www.kernel.org/pub/software/scm/git/docs/git-clone.html#URLS
+    #
+    # Example github remote urls
+    #
+    #   git://github.com/<user>/<project>.git
+    #   git@github.com:<user>/<project>.git
+    #
     local remote_name project github_user
     remote_name=$1
     project=$(\git config --get remote.${remote_name}.url)
+    project=${project#*://*/}
     project=${project##*:}
     github_user=${project%%/*}
     echo "${github_user}"
@@ -81,7 +90,7 @@ __pmf_github_get_api_url() {
     # Get project name from git config
     project=$(\git config --get remote.${remote_name}.url)
     project=${project##*:}
-    github_user=${project%%/*}
+    github_user=$(__pmf_github_get_github_user ${remote_name})
     project=${project##*/}
     project=${project%.git}
     echo "https://api.github.com/repos/${github_user}/${project}/${request_type}"
@@ -291,12 +300,12 @@ __pmf_gateway() {
             case "${script_arg}" in
                 list-pull-requests)
                     # Pop the command argument we just parsed - we don't need to pass it to the handler
-                    shift && __pmf_github_list_item_type "${filtered_options[@]}" "pulls?state=open" || { return_value=$?; }
+                    shift && __pmf_github_list_item_type "$@" "pulls?state=open" || { return_value=$?; }
                     break;
                     ;;
                 list-milestones)
                     # Pop the command argument we just parsed - we don't need to pass it to the handler
-                    shift && __pmf_github_list_item_type "${filtered_options[@]}" "milestones?state=open" || { return_value=$?; }
+                    shift && __pmf_github_list_item_type "$@" "milestones?state=open" || { return_value=$?; }
                     break;
                     ;;
                 *)
