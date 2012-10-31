@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #--------------------------------------------------------------------------------------------------
 # Title:        pullmyfinger
-# Author:       Fred Palmer (fred@studionow.com)
+# Author:       Fred Palmer (fred.palmer@gmail.com)
 # Date:         2012.02.01
 # Purpose:      Make pull requests easier and quicker to accomplish as well as facilitate better
 #               Github integration.
@@ -9,9 +9,9 @@
 # Installation:
 #               Source this script or add the following line to your .bashrc or .bash_profile
 #                   source <path to where it will live>/pullmyfinger
-#               Set the following environment variables (also in your .bashrc or .bash_profile):
-#                   GITHUB_LOGIN=<your github login name>
-#                   GITHUB_PASSWORD=<your github password>
+#
+#               Run the setup command and follow the directions:
+#                   pullmyfinger --setup
 #
 # More Information:
 #               https://github.com/fredpalmer/pullmyfinger
@@ -19,10 +19,55 @@
 #--------------------------------------------------------------------------------------------------
 __PULLMYFINGER_VERSION="0.9"
 
+__pmf_setup() {
+    local github_login github_password github_output github_error_message github_token return_code
+    return_code=99
+    echo "Running setup for pullmyfinger which will use HTTPS to create a Github OAuth token with the scope of \"repo\""
+    echo -ne "Please enter your github username: ";
+    read github_login
+
+    echo -ne "Please enter your github password (it will not be stored anywhere and will only be used to make one https request): ";
+    read github_password
+
+    github_output=$(\curl                          \
+       --silent                                    \
+       --show-error                                \
+       --request POST                              \
+       --header "Content-type: application/json"   \
+       --data '{"scopes": [ "repo" ], "note": "pullmyfinger-oauth-token"}' \
+       --user "${github_login}:${github_password}" \
+    https://api.github.com/authorizations)
+
+    if [[ -z "${github_output}" ]]
+    then
+        echo -e "ERROR => Token request failed to create :( \n\n${github_output}"
+    else
+        github_error_message=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['message']" 2>/dev/null)
+        if [[ -z ${github_error_message} ]]
+        then
+            github_token=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['token']")
+            echo "OAuth token was created successfully => ${github_token}"
+            echo "Please add the following to your shell's profile =>
+
+    export GITHUB_OAUTH_TOKEN=${github_token}
+    export GITHUB_LOGIN=${github_login}
+
+"
+            return_code=0
+        else
+            echo -e "\n\nERROR => OAuth token failed to create => \"${github_error_message}\".  Here's the full output =>"
+            echo "${github_output}" | python -m json.tool
+        fi
+    fi
+
+    # Return false by default
+    return ${return_code}
+}
+
 __pmf_display_version() {
     echo "pullmyfinger ${__PULLMYFINGER_VERSION}
 
-Copyright 2012  Fred Palmer <fred@studionow.com>
+Copyright 2012  Fred Palmer <fred.palmer@gmail.com>
     https://github.com/fredpalmer/pullmyfinger
 "
 }
@@ -34,16 +79,19 @@ Usage: pullmyfinger [OPTION] branch|remote
 Config:
     Uses the following environment variables:
     GITHUB_LOGIN                A valid Github login (Required)
-    GITHUB_PASSWORD             A valid password for the Github login (Required)
+    GITHUB_OAUTH_TOKEN          A valid OAuth token for the Github login with repo scope access (Required)
     PULLMYFINGER_SIGNATURE      The signature to put at the end of a pull request message (Optional)
 
 Examples:
 
-    # Create a pull request to the remote \"studionow\" using the base (i.e. the target branch) of \"master\"
-    pullmyfinger studionow/master
+    # Runs the setup to create an OAuth token for making pull requests
+    pullmyfinger --setup
 
-    # List all pull requests to the remote \"studionow\" for the current clone
-    pullmyfinger --list-pull-requests studionow
+    # Within a clone of the pullmyfinger repo this command creates a pull request to the remote \"fredpalmer\" using the base (i.e. the target branch) of \"master\"
+    pullmyfinger fredpalmer/master
+
+    # List all pull requests to the remote \"fredpalmer\" for the current clone of pullmyfinger
+    pullmyfinger --list-pull-requests fredpalmer
 
 General:
     -h, --help                  Show this help text
@@ -51,6 +99,7 @@ General:
     --debug                     Displays debugging information
     --base                      Explicitly set the base (or target) branch for a pull request
     --head                      Explicitly set the head (or source) branch for a pull request
+    --setup                     Creates an OAuth token for making pull requests
 
 Get various types of data associated with a repo:
     --list-pull-requests        List open pull requests for the remote specified
@@ -192,13 +241,13 @@ __pmf_github_create_pull_request() {
     echo "    Head (source) branch   => ${head_remote_true_name}/${head_branch}"
     echo "    Github Url             => ${github_api_url}"
 
-    github_output=$(\curl                           \
-        --silent                                    \
-        --show-error                                \
-        --request POST                              \
-        --header "Content-type: application/json"   \
-        --user "${GITHUB_LOGIN}:${GITHUB_PASSWORD}" \
-        --data "${github_pull_request_payload}"                         \
+    github_output=$(\curl                                       \
+        --silent                                                \
+        --header "Authorization: bearer ${GITHUB_OAUTH_TOKEN}"  \
+        --show-error                                            \
+        --request POST                                          \
+        --header "Content-type: application/json"               \
+        --data "${github_pull_request_payload}"                 \
         ${github_api_url})
 
     if [[ -z "${github_output}" ]]
@@ -241,7 +290,7 @@ __pmf_github_list_item_type() {
     echo "    Remote name   => ${remote_name}"
     echo "    Github Url    => ${github_api_url}"
 
-    \curl --silent --user "${GITHUB_LOGIN}:${GITHUB_PASSWORD}" ${github_api_url} | python -m json.tool
+    \curl --silent --header "Authorization: bearer ${GITHUB_OAUTH_TOKEN}" ${github_api_url} | python -m json.tool
 }
 
 __pmf_validate_environment() {
@@ -249,8 +298,8 @@ __pmf_validate_environment() {
     return_code=0
 
     # Verify environment variables are set
-    [[ -z ${GITHUB_LOGIN} ]] && { echo "ERROR => \"GITHUB_LOGIN\" env variable was not set..."; return_code=99; }
-    [[ -z ${GITHUB_PASSWORD} ]] && { echo "ERROR => \"GITHUB_PASSWORD\" env variable was not set..."; return_code=99; }
+    [[ -z ${GITHUB_LOGIN} ]] && { echo "ERROR => \"GITHUB_LOGIN\" env variable was not set, please run with --setup..."; return_code=99; }
+    [[ -z ${GITHUB_OAUTH_TOKEN} ]] && { echo "ERROR => \"GITHUB_OAUTH_TOKEN\" env variable was not set, please run with --setup..."; return_code=99; }
 
     # Verify git exists
     type -P git >/dev/null || { echo "ERROR => The program \"git\" was not found in the current PATH..."; return_code=99; }
@@ -273,6 +322,10 @@ __pmf_gateway() {
         command="${command#-}"
 
         case "${command}" in
+            setup)
+                __pmf_setup;
+                return $?;
+                ;;
             help|h)
                 __pmf_display_usage;
                 return $?;
@@ -394,7 +447,7 @@ __pmf_completion() {
         if [[ ${current_word} == -* ]]
         then
             # User is trying to specify the command line directive to use
-            completion_options="--help --debug --base= --head= --version --list-pull-requests --list-milestones"
+            completion_options="--help --debug --base= --head= --version --list-pull-requests --list-milestones --setup"
             COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
         elif [[ "${COMP_LINE}" != *--* ]]
         then
@@ -412,7 +465,7 @@ __pmf_completion() {
 alias pullmyfinger=__pmf_gateway
 complete -F __pmf_completion pullmyfinger
 
-# Also run the completion scripts for any aliases out there
+# Also run the completion scripts for any aliases out there (@westonstudionow !!!)
 for aliased_command in $(\alias | \grep "='pullmyfinger'" | \cut -d ' ' -f2 | \cut -d '=' -f1)
 do
     complete -F __pmf_completion ${aliased_command}
