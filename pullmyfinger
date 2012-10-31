@@ -23,11 +23,11 @@ __pmf_setup() {
     local github_login github_password github_output github_error_message github_token return_code
     return_code=99
     echo "Running setup for pullmyfinger which will use HTTPS to create a Github OAuth token with the scope of \"repo\""
-    echo -ne "Please enter your github username: ";
-    read github_login
+    read -p "Please enter your github username: " github_login;
 
-    echo -ne "Please enter your github password (it will not be stored anywhere and will only be used to make one https request): ";
-    read github_password
+    stty -echo
+    read -p "Please enter your github password (used to make an https request to Github API): " github_password; echo
+    stty echo
 
     github_output=$(\curl                          \
        --silent                                    \
