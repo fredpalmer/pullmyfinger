@@ -49,8 +49,8 @@ __pmf_setup() {
             echo "OAuth token was created successfully => ${github_token}"
             echo "Please add the following to your shell's profile =>
 
-    export GITHUB_OAUTH_TOKEN=${github_token}
-    export GITHUB_LOGIN=${github_login}
+export GITHUB_OAUTH_TOKEN=${github_token}
+export GITHUB_LOGIN=${github_login}
 
 "
             return_code=0
