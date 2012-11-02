@@ -255,17 +255,17 @@ __pmf_github_create_pull_request() {
         echo -e "ERROR => Pull request failed to create :( \n\n${github_output}"
     else
         # Now make sure we didn't have an error message returned
-        github_error_message=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['message']" 2>/dev/null)
+        github_error_message=$(echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print obj['message']" 2>/dev/null)
         if [[ -z ${github_error_message} ]]
         then
-            github_url=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['html_url']")
-            github_pull_request_number=$(echo "${github_output}" | \python -c "import json;import sys;obj=json.load(sys.stdin);print obj['number']")
+            github_url=$(echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print obj['html_url']")
+            github_pull_request_number=$(echo "${github_output}" | python -c "import sys;import json;sys.path.remove('');obj=json.load(sys.stdin);print obj['number']")
             echo "Pull request ${github_pull_request_number} was created successfully at ${github_url}"
             \open ${github_url}
             return_code=0
         else
             echo -e "\n\nERROR => Pull request failed to create because \"${github_error_message}\".  Here's the full output =>"
-            echo "${github_output}" | python -m json.tool
+            echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print json.dumps(obj, sort_keys=True, indent=4);"
         fi
     fi
 
