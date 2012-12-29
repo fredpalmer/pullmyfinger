@@ -188,7 +188,15 @@ __pmf_github_create_pull_request() {
         esac
     done;
 
-    base_branch=$1
+    if [[ -z ${base_branch} ]]
+    then
+        if [[ "$1" == "" ]]
+        then
+            base_branch=$2
+        else
+            base_branch=$1
+        fi
+    fi
 
     # Validate the argument is a branch
     if ! __pmf_validate_git_ref_exists "${base_branch}"
@@ -241,7 +249,7 @@ __pmf_github_create_pull_request() {
     \"head\": \"${head_remote_true_name}:${head_branch}\",
     \"base\": \"${base_remote_true_name}:${base_branch}\"
 }"
-    
+
     echo "Initiating Github API request with the following configuration:"
     echo "    Base (target) branch   => ${base_remote_true_name}/${base_branch}"
     echo "    Head (source) branch   => ${head_remote_true_name}/${head_branch}"
