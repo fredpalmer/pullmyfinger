@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+
+log() {
+    echo "[$(date +"%D %T")] $@" > /dev/ttys002
+}
+
+_get_comp_var() {
+    # Uses set to get the printable version of a variable (i.e. non-printable characters)
+    local temp
+    temp=$(set | \grep "^$1=")
+    # trim the quotes around the variable
+    temp=${temp#*=$\'}
+    temp=${temp%*=\'}
+    # Replace slash with double-slash
+    temp=${temp//\/\\}
+    echo ${temp}
+}
+__xxx_completion() {
+    local current_word previous_word previous_word2 completion_options
+    COMPREPLY=()
+    current_word="${COMP_WORDS[COMP_CWORD]}"
+    previous_word="${COMP_WORDS[COMP_CWORD-1]}"
+
+    if [[ ${#COMP_WORDS[@]} -gt 2 ]]
+    then
+        previous_word2="${COMP_WORDS[COMP_CWORD-2]}"
+    else
+        previous_word2=""
+    fi
+
+    log "======= ${FUNCNAME} called ========="
+    log "COMP_CWORD         => \"${COMP_CWORD}\""
+    log "COMP_KEY           => \"${COMP_KEY}\""
+    log "COMP_LINE          => \"${COMP_LINE}\""
+    log "COMP_POINT         => \"${COMP_POINT}\""
+    log "COMP_TYPE          => \"${COMP_TYPE}\""
+    log "COMP_WORDBREAKS    => \"$(_get_comp_var COMP_WORDBREAKS)\""
+    log "COMP_WORDS         => \"${COMP_WORDS[@]}\""
+    log "IFS                => \"$(_get_comp_var IFS)\""
+
+    current_word="${COMP_WORDS[COMP_CWORD]}"
+    previous_word="${COMP_WORDS[COMP_CWORD-1]}"
+    log "current_word       => \"${current_word}\""
+    log "previous_word      => \"${previous_word}\""
+    log "previous_word2     => \"${previous_word2}\""
+
+    if [[ ${current_word} =~ ^--(base|head).* ]] || \
+       [[ ${current_word} == "=" && ${previous_word} =~ ^--(base|head).* ]] || \
+       [[ ${previous_word2} =~ ^--(base|head) ]]
+    then
+        # User is trying to manually specify the base and head for a pull request and
+        # has completed setting the --head and/or --base option and needs to auto-complete
+        # the remote branch to use as the option's value
+
+        # filter out previous branches selected
+        previous_word=${previous_word#--base}
+        previous_word=${previous_word#--head}
+        previous_word=${previous_word#=}
+        # On older versions of bash this will be the branch name that was previously selected
+        # On newer versions of bash this will be blank
+        if [[ "${previous_word}" != "" ]]
+        then
+            completion_options=$(\git branch -r | \grep -v "HEAD" | \grep -v ${previous_word})
+        else
+            if [[ ${previous_word2} =~ ^--(base|head) ]] && (( ${COMP_CWORD} > 4 ))
+            then
+                completion_options=$(\git branch -r | \grep -v "HEAD" | \grep -v ${COMP_WORDS[3]})
+            else
+                completion_options=$(\git branch -r | \grep -v "HEAD")
+            fi
+        fi
+
+        # massage what's matched so its (compatible with older versions of bash)
+        current_word=${current_word#--base}
+        current_word=${current_word#--head}
+        current_word=${current_word#=}
+    elif [[ "${COMP_LINE}" == *--base=* && ${COMP_LINE} != *--head=* ]]
+    then
+        # User is trying to manually specify the base and head for a pull request and
+        # has completed setting the --base option and now
+        # we can automatically fill in the --head part and start
+        # command line completion for it as well
+        completion_options="--head="
+    elif [[ "${COMP_LINE}" == *--head=* && ${COMP_LINE} != *--base=* ]]
+    then
+        # User is trying to manually specify the base and head for a pull request and
+        # has completed setting the --head option and now
+        # we can automatically fill in the --base part and start
+        # command line completion for it as well
+        completion_options="--base="
+    elif [[ ${previous_word} == --list-* ]]
+    then
+        # User is trying to use one of the "list" read-only style commands and needs
+        # to autocomplete with the configured remotes for the current working clone
+        completion_options=$(\git remote show)
+    elif (( ${COMP_CWORD} < 2))
+    then
+        if [[ ${current_word} == -* ]]
+        then
+            # User is trying to specify the command line directive to use
+            completion_options="--help --debug --base= --head= --version --list-pull-requests --list-milestones"
+            COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
+        elif [[ "${COMP_LINE}" != *--* ]]
+        then
+            # User is trying to specify the remote branch to issue a pull request to
+            completion_options=$(\git branch -r | \grep -v "HEAD")
+        fi
+    fi
+
+    COMPREPLY=( $(compgen -W "${completion_options}" -- ${current_word}) )
+    [[ ${COMPREPLY} == *= ]] && compopt -o nospace
+
+    log "completion_options => \"${completion_options}\""
+    log "COMPREPLY          => \"${COMPREPLY}\""
+    return 0
+}
+
+alias asdfasdf="echo \"completion-testing!!!\""
+complete -F __xxx_completion asdfasdf
