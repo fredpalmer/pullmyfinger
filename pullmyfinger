@@ -20,19 +20,23 @@
 __PULLMYFINGER_VERSION="0.9"
 
 __pmf_setup() {
-    local github_login github_password github_output github_error_message github_token return_code
+    local github_login github_password otp_code github_output github_error_message github_token return_code
     return_code=99
     echo "Running setup for pullmyfinger which will use HTTPS to create a Github OAuth token with the scope of \"repo\""
-    read -p "Please enter your github username: " github_login;
+    read -p "Please enter the github username: " github_login;
 
     stty -echo
-    read -p "Please enter your github password (used to make an https request to Github API): " github_password; echo
+    read -p "Please enter the github password (used to make an https request to Github API): " github_password; echo
     stty echo
+
+    # Two-factor authentication uses the header X-GitHub-OTP
+    read -p "If this accounts uses two-factor authentication, enter a code for this account (ENTER to skip): " otp_code; echo
 
     github_output=$(\curl                          \
        --silent                                    \
        --show-error                                \
        --request POST                              \
+       --header "X-GitHub-OTP: ${otp_code}"        \
        --header "Content-type: application/json"   \
        --data '{"scopes": [ "repo" ], "note": "pullmyfinger-oauth-token"}' \
        --user "${github_login}:${github_password}" \
