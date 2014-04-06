@@ -17,7 +17,7 @@
 #               https://github.com/fredpalmer/pullmyfinger
 #               http://developer.github.com/v3/
 #--------------------------------------------------------------------------------------------------
-__PULLMYFINGER_VERSION="0.9"
+__PULLMYFINGER_VERSION="1.0.2"
 
 __pmf_setup() {
     local github_login github_password otp_code github_output github_error_message github_token return_code
@@ -71,7 +71,7 @@ export GITHUB_LOGIN=${github_login}
 __pmf_display_version() {
     echo "pullmyfinger ${__PULLMYFINGER_VERSION}
 
-Copyright 2012  Fred Palmer <fred.palmer@gmail.com>
+Copyright 2014  Fred Palmer <fred.palmer@gmail.com>
     https://github.com/fredpalmer/pullmyfinger
 "
 }
