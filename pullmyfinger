@@ -71,7 +71,7 @@ export GITHUB_LOGIN=${github_login}
 __pmf_display_version() {
     echo "pullmyfinger ${__PULLMYFINGER_VERSION}
 
-Copyright 2014  Fred Palmer <fred.palmer@gmail.com>
+Copyright 2014  Fred Palmer <fred.palmer at gmail dot com>
     https://github.com/fredpalmer/pullmyfinger
 "
 }
@@ -104,12 +104,14 @@ General:
     --base                      Explicitly set the base (or target) branch for a pull request
     --head                      Explicitly set the head (or source) branch for a pull request
     --setup                     Creates an OAuth token for making pull requests
+    --list-pull-requests        Lists pull requests for the given remote
+    --list-milestones           Lists milestones for the given remote
 
 Get various types of data associated with a repo:
     --list-pull-requests        List open pull requests for the remote specified
     --list-milestones           List open milestones
 
-Report bugs to <fred@studionow.com>
+Report bugs to <fred.palmer at gmail dot com>
 "
 
     __pmf_display_version
@@ -511,7 +513,6 @@ __pmf_completion() {
 alias pullmyfinger=__pmf_gateway
 complete -F __pmf_completion pullmyfinger
 
-# Also run the completion scripts for any aliases out there (@westonstudionow !!!)
 for aliased_command in $(\alias | \grep "='pullmyfinger'" | \cut -d ' ' -f2 | \cut -d '=' -f1)
 do
     complete -F __pmf_completion ${aliased_command}
