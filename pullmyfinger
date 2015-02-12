@@ -319,7 +319,7 @@ __pmf_github_create_pull_request() {
 }
 
 __pmf_github_list_item_type() {
-    local remote_name git_hub_api_url item_type github_api_url
+    local remote_name item_type github_api_url
     remote_name=$1
     item_type=$2
 
