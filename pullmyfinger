@@ -17,7 +17,7 @@
 #               https://github.com/fredpalmer/pullmyfinger
 #               http://developer.github.com/v3/
 #--------------------------------------------------------------------------------------------------
-__PULLMYFINGER_VERSION="1.0.2"
+__PULLMYFINGER_VERSION="1.1"
 
 __pmf_setup() {
     local github_login github_password otp_code github_output github_error_message github_token return_code
@@ -30,7 +30,7 @@ __pmf_setup() {
     stty echo
 
     # Two-factor authentication uses the header X-GitHub-OTP
-    read -p "If this accounts uses two-factor authentication, enter a code for this account (ENTER to skip): " otp_code; echo
+    read -p "If this account uses two-factor authentication, enter the current code (ENTER to skip): " otp_code; echo
 
     github_output=$(\curl                          \
        --silent                                    \
@@ -166,12 +166,42 @@ __pmf_validate_git_ref_exists() {
     return ${return_code}
 }
 
+__pmf_get_pull_request_body() {
+    local temp_file modified_content
+    local sample_pull_request_body="${1}"
+    sample_pull_request_body="$(echo -e "${sample_pull_request_body}" | sed -e 's/^/#    /')"
+    local byline="
+# Please enter the body of your pull request. Lines starting
+# with '#' will be ignored, and an empty message aborts the pull request.
+# Here's an example:
+${sample_pull_request_body}"
+
+    # Create temp file
+    temp_file="/tmp/pullmyfinger-$$.tmp"
+    echo -e "${byline}" > "${temp_file}"
+
+    # Launch editor and modify the contents
+    # Make sure that terminal input/output are correctly setup during a subshell invocation
+    terminal=$(tty)
+    ${EDITOR:-vi} ${temp_file} < ${terminal} > ${terminal}
+    __pmf_pull_request_body="$(cat ${temp_file} | sed '/^#/d')"
+    \rm -f "${temp_file}"
+
+    #Check for empty message
+    if (($( echo -e "${__pmf_pull_request_body}" | sed '/^\s*#/d;/^\s*$/d' | wc -c | awk '{print $1}') == 0))
+    then
+        echo "Aborting due to empty pull request body..."
+        return 99;
+    fi
+    return 0;
+}
+
 __pmf_github_create_pull_request() {
     local return_code command script_arg commit_message \
           base_branch base_remote_alias base_remote_true_name \
           head_branch head_remote_alias head_remote_true_name \
           github_output github_api_url github_url github_pull_request_number github_error_message github_pull_request_payload \
-          attempt_merge failed
+          attempt_merge failed sample_pull_request_body
 
     return_code=1
     attempt_merge=0
@@ -249,70 +279,82 @@ __pmf_github_create_pull_request() {
         return 99;
     fi
 
-    github_api_url=$(__pmf_github_get_api_url ${base_remote_alias} "pulls")
-    github_pull_request_payload="{
-        \"title\": \"Pull request to ${base_remote_true_name}/${base_branch} from ${head_remote_true_name}/${head_branch#refs/heads/}\",
-        \"body\": \"Please pull these commits into ${base_remote_true_name}/${base_branch}.  Here is the latest commit message:\n\n*\\\"${commit_message}\\\"*\n\n${PULLMYFINGER_SIGNATURE}\",
-        \"head\": \"${head_remote_true_name}:${head_branch}\",
-        \"base\": \"${base_branch}\"
-    }"
-
-    echo "Initiating Github API request with the following configuration:"
-    echo "    Base (target) branch   => ${base_remote_true_name}/${base_branch}"
-    echo "    Head (source) branch   => ${head_remote_true_name}/${head_branch}"
-    echo "    Github Url             => ${github_api_url}"
-    echo "    Github API payload     => ${github_pull_request_payload}"
-
-    github_output=$(\curl                                       \
-        --silent                                                \
-        --user "${GITHUB_OAUTH_TOKEN}:x-oauth-basic"            \
-        --show-error                                            \
-        --request POST                                          \
-        --header "Content-type: application/json"               \
-        --data "${github_pull_request_payload}"                 \
-        ${github_api_url})
-
-    if [[ -z "${github_output}" ]]
+    # Get commit message from command line
+    sample_pull_request_body="Please pull these commits into ${base_remote_true_name}/${base_branch}. Here is the latest commit message:\n\n*\\\"${commit_message}\\\"*"
+    __pmf_pull_request_body=""
+    if __pmf_get_pull_request_body "${sample_pull_request_body}"
     then
-        echo -e "ERROR => Pull request failed to create :( \n\n${github_output}"
-    elif [[ $(echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);" 2>&1 | \grep "ValueError") ]]
-    then
-        # Makes sure the service is up and returning JSON
-        echo -e "\n\nERROR => Pull request failed to create because no discernable output was available from the API.  Here's the full output =>\n\n${github_output}"
-    else
-        # Now make sure we didn't have an error message returned
-        github_error_message=$(echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print obj['message']" 2>/dev/null)
-        if [[ -z "${github_error_message}" ]]
+        if [[ "${PULLMYFINGER_SIGNATURE}" != "" ]]
         then
-            failed=0
+            __pmf_pull_request_body="${__pmf_pull_request_body}\n${PULLMYFINGER_SIGNATURE}"
+        fi
+        # JSONify the body (it will add quotes)
+        __pmf_pull_request_body=$(echo -en "${__pmf_pull_request_body}" | python -c 'import json,sys; print json.dumps(sys.stdin.read())')
+        github_api_url=$(__pmf_github_get_api_url ${base_remote_alias} "pulls")
+        github_pull_request_payload="{
+            \"title\": \"Pull request to ${base_remote_true_name}/${base_branch} from ${head_remote_true_name}/${head_branch#refs/heads/}\",
+            \"body\": ${__pmf_pull_request_body},
+            \"head\": \"${head_remote_true_name}:${head_branch}\",
+            \"base\": \"${base_branch}\"
+        }"
+
+        echo "Initiating Github API request with the following configuration:"
+        echo "    Base (target) branch   => ${base_remote_true_name}/${base_branch}"
+        echo "    Head (source) branch   => ${head_remote_true_name}/${head_branch}"
+        echo "    Github Url             => ${github_api_url}"
+        echo "    Github API payload     => ${github_pull_request_payload}"
+
+        github_output=$(\curl                                       \
+            --silent                                                \
+            --user "${GITHUB_OAUTH_TOKEN}:x-oauth-basic"            \
+            --show-error                                            \
+            --request POST                                          \
+            --header "Content-type: application/json"               \
+            --data "${github_pull_request_payload}"                 \
+            ${github_api_url})
+
+        if [[ -z "${github_output}" ]]
+        then
+            echo -e "ERROR => Pull request failed to create :( \n\n${github_output}"
+        elif [[ $(echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);" 2>&1 | \grep "ValueError") ]]
+        then
+            # Makes sure the service is up and returning JSON
+            echo -e "\n\nERROR => Pull request failed to create because no discernable output was available from the API.  Here's the full output =>\n\n${github_output}"
         else
-            echo -e "\n\nERROR => Pull request failed to create because \"${github_error_message}\".  Here's the full output =>"
-            echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print json.dumps(obj, sort_keys=True, indent=4);"
+            # Now make sure we didn't have an error message returned
+            github_error_message=$(echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print obj['message']" 2>/dev/null)
+            if [[ -z "${github_error_message}" ]]
+            then
+                failed=0
+            else
+                echo -e "\n\nERROR => Pull request failed to create because \"${github_error_message}\".  Here's the full output =>"
+                echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print json.dumps(obj, sort_keys=True, indent=4);"
+            fi
         fi
-    fi
 
-    if (( failed != 1 ))
-    then
-        github_url=$(echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print obj['html_url']")
-        github_pull_request_number=$(echo "${github_output}" | python -c "import sys;import json;sys.path.remove('');obj=json.load(sys.stdin);print obj['number']")
-        echo "Pull request ${github_pull_request_number} was created successfully at ${github_url}"
-        if (( ${attempt_merge} == 1 ))
+        if (( failed != 1 ))
         then
-            echo "Attempting to merge the last pull request..."
-            sleep 3
-            # PUT /repos/:owner/:repo/pulls/:number/merge
-            github_output=$(\curl                                       \
-                --silent                                                \
-                --user "${GITHUB_OAUTH_TOKEN}:x-oauth-basic"            \
-                --show-error                                            \
-                --request PUT                                           \
-                --header "Content-type: application/json"               \
-                --data "${github_pull_request_payload}"                 \
-                "${github_api_url}/${github_pull_request_number}/merge")
-            echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print json.dumps(obj, sort_keys=True, indent=4);"
+            github_url=$(echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print obj['html_url']")
+            github_pull_request_number=$(echo "${github_output}" | python -c "import sys;import json;sys.path.remove('');obj=json.load(sys.stdin);print obj['number']")
+            echo "Pull request ${github_pull_request_number} was created successfully at ${github_url}"
+            if (( ${attempt_merge} == 1 ))
+            then
+                echo "Attempting to merge the last pull request..."
+                sleep 3
+                # PUT /repos/:owner/:repo/pulls/:number/merge
+                github_output=$(\curl                                       \
+                    --silent                                                \
+                    --user "${GITHUB_OAUTH_TOKEN}:x-oauth-basic"            \
+                    --show-error                                            \
+                    --request PUT                                           \
+                    --header "Content-type: application/json"               \
+                    --data "${github_pull_request_payload}"                 \
+                    "${github_api_url}/${github_pull_request_number}/merge")
+                echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print json.dumps(obj, sort_keys=True, indent=4);"
+            fi
+            \open ${github_url}
+            return_code=0
         fi
-        \open ${github_url}
-        return_code=0
     fi
 
     return ${return_code}
