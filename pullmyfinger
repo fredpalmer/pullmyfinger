@@ -166,26 +166,30 @@ __pmf_validate_git_ref_exists() {
     return ${return_code}
 }
 
+__pmg_commit_message_temp_file="/tmp/pullmyfinger-COMMIT_MESSAGE"
+
 __pmf_get_pull_request_body() {
-    local temp_file modified_content
+    local modified_content
     local sample_pull_request_body="${1}"
+    local commit_message="${2}"
     sample_pull_request_body="$(echo -e "${sample_pull_request_body}" | sed -e 's/^/#    /')"
-    local byline="
+    local byline="${commit_message}
 # Please enter the body of your pull request. Lines starting
 # with '#' will be ignored, and an empty message aborts the pull request.
 # Here's an example:
 ${sample_pull_request_body}"
 
-    # Create temp file
-    temp_file="/tmp/pullmyfinger-$$.tmp"
-    echo -e "${byline}" > "${temp_file}"
+    # Create temp file if it doesn't exist already
+    if [[ ! -e "${__pmg_commit_message_temp_file}" ]]
+    then
+        echo -e "${byline}" > "${__pmg_commit_message_temp_file}"
+    fi
 
     # Launch editor and modify the contents
     # Make sure that terminal input/output are correctly setup during a subshell invocation
     terminal=$(tty)
-    ${EDITOR:-vi} ${temp_file} < ${terminal} > ${terminal}
-    __pmf_pull_request_body="$(cat ${temp_file} | sed '/^#/d')"
-    \rm -f "${temp_file}"
+    ${EDITOR:-vi} ${__pmg_commit_message_temp_file} < ${terminal} > ${terminal}
+    __pmf_pull_request_body="$(cat ${__pmg_commit_message_temp_file} | sed '/^#/d')"
 
     #Check for empty message
     if (($( echo -e "${__pmf_pull_request_body}" | sed '/^\s*#/d;/^\s*$/d' | wc -c | awk '{print $1}') == 0))
@@ -280,9 +284,9 @@ __pmf_github_create_pull_request() {
     fi
 
     # Get commit message from command line
-    sample_pull_request_body="Please pull these commits into ${base_remote_true_name}/${base_branch}. Here is the latest commit message:\n\n*\\\"${commit_message}\\\"*"
+    sample_pull_request_body="Please pull these commits into ${base_remote_true_name}/${base_branch}. Here is the latest commit message:\n\n_\"${commit_message}\"_"
     __pmf_pull_request_body=""
-    if __pmf_get_pull_request_body "${sample_pull_request_body}"
+    if __pmf_get_pull_request_body "${sample_pull_request_body}" "${commit_message}"
     then
         if [[ "${PULLMYFINGER_SIGNATURE}" != "" ]]
         then
@@ -353,6 +357,9 @@ __pmf_github_create_pull_request() {
                 echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print json.dumps(obj, sort_keys=True, indent=4);"
             fi
             \open ${github_url}
+
+            # Only delete the commit message if successful to allow for the message to altered between failures
+            \rm -f "${__pmg_commit_message_temp_file}"
             return_code=0
         fi
     fi
