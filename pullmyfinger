@@ -19,7 +19,7 @@
 #--------------------------------------------------------------------------------------------------
 __PULLMYFINGER_VERSION="1.1"
 
-__pmf_setup() {
+function __pmf_setup() {
     local github_login github_password otp_code github_output github_error_message github_token return_code
     return_code=99
     echo "Running setup for pullmyfinger which will use HTTPS to create a Github OAuth token with the scope of \"repo\""
@@ -68,7 +68,7 @@ export GITHUB_LOGIN=${github_login}
     return ${return_code}
 }
 
-__pmf_display_version() {
+function __pmf_display_version() {
     echo "pullmyfinger ${__PULLMYFINGER_VERSION}
 
 Copyright 2014  Fred Palmer <fred.palmer at gmail dot com>
@@ -76,7 +76,7 @@ Copyright 2014  Fred Palmer <fred.palmer at gmail dot com>
 "
 }
 
-__pmf_display_usage() {
+function __pmf_display_usage() {
     echo "
 Usage: pullmyfinger [OPTION] branch|remote
 
@@ -119,7 +119,7 @@ Report bugs to <fred.palmer at gmail dot com>
     return 0;
 }
 
-__pmf_github_get_github_user() {
+function __pmf_github_get_github_user() {
     # Git Url Specification:
     #   http://www.kernel.org/pub/software/scm/git/docs/git-clone.html#URLS
     #
@@ -137,7 +137,7 @@ __pmf_github_get_github_user() {
     echo "${github_user}"
 }
 
-__pmf_github_get_api_url() {
+function __pmf_github_get_api_url() {
     local remote_name project github_user request_type
     remote_name=$1
     request_type=$2
@@ -151,7 +151,7 @@ __pmf_github_get_api_url() {
     echo "https://api.github.com/repos/${github_user}/${project}/${request_type}"
 }
 
-__pmf_validate_git_ref_exists() {
+function __pmf_validate_git_ref_exists() {
     local return_code git_ref
     git_ref=$1
     return_code=0
@@ -159,7 +159,7 @@ __pmf_validate_git_ref_exists() {
     # Validate the argument is a valid git-ref
     if ! \git rev-parse --verify --quiet "${git_ref}" > /dev/null
     then
-        echo "ERROR => The target (base) branch \"${git_ref}\" could not be verified as a valid git reference..."
+        echo "ERROR => \"${git_ref}\" could not be verified as a valid git reference..."
         return_code=1
     fi
 
@@ -168,12 +168,23 @@ __pmf_validate_git_ref_exists() {
 
 __pmg_commit_message_temp_file="/tmp/pullmyfinger-COMMIT_MESSAGE"
 
-__pmf_get_pull_request_body() {
-    local modified_content
-    local sample_pull_request_body="${1}"
-    local commit_message="${2}"
+function __pmf_get_pull_request_body() {
+    local modified_content return_code byline pull_request_template pull_request_template_path sample_pull_request_body commit_message
+    sample_pull_request_body="${1}"
+    commit_message="${2}"
+    pull_request_template_path=".github/PULL_REQUEST_TEMPLATE.md"
     sample_pull_request_body="$(echo -e "${sample_pull_request_body}" | sed -e 's/^/#    /')"
-    local byline="${commit_message}
+
+    if [[ -e "${pull_request_template_path}" ]]
+    then
+        pull_request_template="$(cat .github/PULL_REQUEST_TEMPLATE.md)"
+        # Replace any parameters in the template with the commit message
+        byline="${pull_request_template//__description__/${commit_message}}"
+    else
+        byline="${commit_message}"
+    fi
+
+    byline="${byline}
 # Please enter the body of your pull request. Lines starting
 # with '#' will be ignored, and an empty message aborts the pull request.
 # Here's an example:
@@ -189,7 +200,18 @@ ${sample_pull_request_body}"
     # Make sure that terminal input/output are correctly setup during a subshell invocation
     terminal=$(tty)
     ${EDITOR:-vi} ${__pmg_commit_message_temp_file} < ${terminal} > ${terminal}
-    __pmf_pull_request_body="$(cat ${__pmg_commit_message_temp_file} | sed '/^#/d')"
+
+    return_code=$?
+
+    # Check to make sure the editor exited with success, else we need to abort
+    if ((${return_code} != 0))
+    then
+        echo "Aborting based on editor exit code..."
+        return ${return_code};
+    fi
+
+    # Get the pull request body and remove any comments from it
+    __pmf_pull_request_body="$(cat ${__pmg_commit_message_temp_file} | sed '/^# /d')"
 
     #Check for empty message
     if (($( echo -e "${__pmf_pull_request_body}" | sed '/^\s*#/d;/^\s*$/d' | wc -c | awk '{print $1}') == 0))
@@ -200,12 +222,12 @@ ${sample_pull_request_body}"
     return 0;
 }
 
-__pmf_github_create_pull_request() {
-    local return_code command script_arg commit_message \
-          base_branch base_remote_alias base_remote_true_name \
-          head_branch head_remote_alias head_remote_true_name \
-          github_output github_api_url github_url github_pull_request_number github_error_message github_pull_request_payload \
-          attempt_merge failed sample_pull_request_body
+function __pmf_github_create_pull_request() {
+    local return_code command script_arg commit_message
+    local base_branch base_remote_alias base_remote_true_name
+    local head_branch head_remote_alias head_remote_true_name
+    local github_output github_api_url github_url github_pull_request_number github_error_message github_pull_request_payload
+    local attempt_merge failed sample_pull_request_body
 
     return_code=1
     attempt_merge=0
@@ -267,6 +289,13 @@ __pmf_github_create_pull_request() {
         head_branch="${head_branch#*/}"
     fi
 
+    # Verify the local branch has been pushed to the remote before continuing
+    if ! __pmf_validate_git_ref_exists "${head_remote_alias}/${head_branch}"
+    then
+        echo "Have you pushed \"${head_branch}\" to the remote \"${head_remote_alias}\"?"
+        return $?
+    fi
+
     # Get the last commit message from the branch we are using as the head branch
     commit_message=$(\git show -s --format=%s "${head_remote_alias}/${head_branch}" | sed -e 's/"//g')
 
@@ -292,7 +321,7 @@ __pmf_github_create_pull_request() {
         then
             __pmf_pull_request_body="${__pmf_pull_request_body}\n${PULLMYFINGER_SIGNATURE}"
         fi
-        # JSONify the body (it will add quotes)
+        # JSON-ify the body (it will add quotes)
         __pmf_pull_request_body=$(echo -en "${__pmf_pull_request_body}" | python -c 'import json,sys; print json.dumps(sys.stdin.read())')
         github_api_url=$(__pmf_github_get_api_url ${base_remote_alias} "pulls")
         github_pull_request_payload="{
@@ -323,7 +352,7 @@ __pmf_github_create_pull_request() {
         elif [[ $(echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);" 2>&1 | \grep "ValueError") ]]
         then
             # Makes sure the service is up and returning JSON
-            echo -e "\n\nERROR => Pull request failed to create because no discernable output was available from the API.  Here's the full output =>\n\n${github_output}"
+            echo -e "\n\nERROR => Pull request failed to create because no discernible output was available from the API.  Here's the full output =>\n\n${github_output}"
         else
             # Now make sure we didn't have an error message returned
             github_error_message=$(echo "${github_output}" | python -c "import sys;sys.path.remove('');import json;obj=json.load(sys.stdin);print obj['message']" 2>/dev/null)
@@ -367,7 +396,7 @@ __pmf_github_create_pull_request() {
     return ${return_code}
 }
 
-__pmf_github_list_item_type() {
+function __pmf_github_list_item_type() {
     local remote_name item_type github_api_url
     remote_name=$1
     item_type=$2
@@ -405,7 +434,7 @@ __pmf_validate_environment() {
     return ${return_code}
 }
 
-__pmf_gateway() {
+function __pmf_gateway() {
     local command return_value debug_mode script_arg filtered_options
     debug_mode=0
     return_value=0
@@ -474,7 +503,7 @@ __pmf_gateway() {
     return ${return_value}
 }
 
-__pmf_completion() {
+function __pmf_completion() {
     local current_word previous_word previous_word2 completion_options
     COMPREPLY=()
     current_word="${COMP_WORDS[COMP_CWORD]}"
